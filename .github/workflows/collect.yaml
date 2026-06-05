@@ -26,6 +26,13 @@ env:
   # include special protocols, such as vless hysteria2 and hysteria
   ENABLE_SPECIAL_PROTOCOLS: ${{ vars.ENABLE_SPECIAL_PROTOCOLS }}
 
+  # IP purity detection
+  PURITY_ENABLED: "true"
+  PURITY_DROP_HOSTING: "false"
+  PURITY_DROP_VPN: "true"
+  PURITY_THRESHOLD: "0.0"
+  PURITY_INJECT_TAGS: "true"
+
 jobs:
   process:
     runs-on: ubuntu-latest

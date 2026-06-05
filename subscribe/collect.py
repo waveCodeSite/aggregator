@@ -16,6 +16,7 @@ import time
 import crawl
 import executable
 import push
+import quality
 import utils
 import workflow
 import yaml
@@ -296,6 +297,46 @@ def aggregate(args: argparse.Namespace) -> None:
         if len(nodes) <= 0:
             logger.error(f"cannot fetch any proxy")
             sys.exit(0)
+
+        # ========== IP 纯净度检测 ==========
+        purity_enabled = os.environ.get("PURITY_ENABLED", "").lower() in ["true", "1"]
+        if purity_enabled and nodes:
+            logger.info(f"IP purity check enabled, proxies: {len(nodes)}")
+            try:
+                purity_config = quality.PurityConfig.from_dict({
+                    "enabled": True,
+                    "drop_hosting": os.environ.get("PURITY_DROP_HOSTING", "false").lower() in ["true", "1"],
+                    "drop_vpn": os.environ.get("PURITY_DROP_VPN", "true").lower() not in ["false", "0"],
+                    "purity_threshold": float(os.environ.get("PURITY_THRESHOLD", "0.0")),
+                    "top_ratio": float(os.environ.get("PURITY_TOP_RATIO", "1.0")),
+                    "use_scamalytics": os.environ.get("PURITY_USE_SCAMALYTICS", "false").lower() in ["true", "1"],
+                })
+                
+                purity_map = quality.batch_check_ip_purity(
+                    proxies=nodes,
+                    use_scamalytics=purity_config.use_scamalytics,
+                    retry=2,
+                    num_threads=args.num,
+                    show_progress=display,
+                )
+                
+                nodes = quality.optimize_by_purity(
+                    proxies=nodes,
+                    purity_map=purity_map,
+                    drop_hosting=purity_config.drop_hosting,
+                    drop_vpn=purity_config.drop_vpn,
+                    purity_threshold=purity_config.purity_threshold,
+                    top_ratio=purity_config.top_ratio,
+                )
+            except Exception as e:
+                logger.error(f"IP purity check failed: {str(e)}")
+            
+            if not nodes:
+                logger.error(f"all proxies removed after purity filtering")
+                sys.exit(0)
+            
+            logger.info(f"IP purity check done, final count: {len(nodes)}")
+        # ========== IP 纯净度检测结束 ==========
 
     subscriptions = set()
     for p in proxies:

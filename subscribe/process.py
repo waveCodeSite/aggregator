@@ -31,6 +31,7 @@ from origin import Origin
 from workflow import TaskConfig
 
 import clash
+import quality
 import subconverter
 
 PATH = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
@@ -56,6 +57,12 @@ class ProcessConfig(object):
     # max acceptable delay
     delay: int = 5000
 
+    # quality optimization config (multi-round latency)
+    quality: dict = field(default_factory=dict)
+
+    # IP purity detection config (anti-fraud)
+    purity: dict = field(default_factory=dict)
+
 
 def load_configs(
     url: str,
@@ -70,6 +77,8 @@ def load_configs(
         update_conf.update(config.get("update", {}))
         crawl_conf.update(config.get("crawl", {}))
         storage.update(config.get("storage", {}))
+        quality_conf.update(config.get("quality", {}))
+        purity_conf.update(config.get("purity", {}))
 
         push_conf = deepcopy(storage)
         push_conf.pop("items", None)
@@ -266,7 +275,7 @@ def load_configs(
         return True
 
     tasks, delay, storage, groups = [], sys.maxsize, {}, {}
-    params, crawl_conf, update_conf = {}, {}, {}
+    params, crawl_conf, update_conf, quality_conf, purity_conf = {}, {}, {}, {}, {}
 
     try:
         if re.match(
@@ -311,6 +320,8 @@ def load_configs(
         groups=groups,
         update=update_conf,
         delay=delay,
+        quality=quality_conf,
+        purity=purity_conf,
     )
 
 
@@ -624,8 +635,53 @@ def aggregate(args: argparse.Namespace) -> None:
                 dead = len(checks) - len(availables)
                 logger.info(f"proxies check finished, total: {len(checks)}, alive: {len(availables)}, dead: {dead}")
 
-        for item in nochecks:
-            item.pop("sub", "")
+
+
+        # ========== IP 纯净度检测 ==========
+        purity_conf = process_config.purity or {}
+        purity_enabled = purity_conf.get("enabled", False) or \
+            os.environ.get("PURITY_ENABLED", "").lower() in ["true", "1"]
+        
+        if purity_enabled and nochecks:
+            logger.info(f"IP purity check enabled for group [{k}], proxies: {len(nochecks)}")
+            
+            purity_config = quality.PurityConfig.from_dict(purity_conf)
+            purity_config.enabled = True
+            
+            # 先清理字段
+            for item in nochecks:
+                item.pop("sub", "")
+                item.pop("chatgpt", None)
+            
+            try:
+                purity_map = quality.batch_check_ip_purity(
+                    proxies=nochecks,
+                    use_scamalytics=purity_config.use_scamalytics,
+                    retry=purity_config.retry,
+                    num_threads=args.num,
+                    show_progress=display,
+                )
+                
+                nochecks = quality.optimize_by_purity(
+                    proxies=nochecks,
+                    purity_map=purity_map,
+                    drop_hosting=purity_config.drop_hosting,
+                    drop_vpn=purity_config.drop_vpn,
+                    purity_threshold=purity_config.purity_threshold,
+                    top_ratio=purity_config.top_ratio,
+                )
+            except Exception as e:
+                logger.error(f"IP purity check failed for group [{k}]: {str(e)}")
+            
+            if not nochecks:
+                logger.error(f"all proxies removed after purity filtering, group=[{k}]")
+                continue
+            
+            logger.info(f"IP purity check done for group [{k}], final count: {len(nochecks)}")
+        else:
+            # 不启用纯净度检测，只清理字段
+            for item in nochecks:
+                item.pop("sub", "")
 
         if len(nochecks) <= 0:
             logger.error(f"cannot fetch any proxy, group=[{k}], cost: {time.time()-starttime:.2f}s")
