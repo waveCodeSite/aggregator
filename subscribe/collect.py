@@ -318,6 +318,8 @@ def aggregate(args: argparse.Namespace) -> None:
                     retry=2,
                     num_threads=args.num,
                     show_progress=display,
+                    workspace=workspace,
+                    clash_bin=os.path.join(workspace, clash_bin),
                 )
                 
                 nodes = quality.optimize_by_purity(

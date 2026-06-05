@@ -660,6 +660,8 @@ def aggregate(args: argparse.Namespace) -> None:
                     retry=purity_config.retry,
                     num_threads=args.num,
                     show_progress=display,
+                    workspace=workspace,
+                    clash_bin=binpath,
                 )
                 
                 nochecks = quality.optimize_by_purity(
