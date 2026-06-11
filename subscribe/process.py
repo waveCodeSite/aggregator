@@ -662,6 +662,8 @@ def aggregate(args: argparse.Namespace) -> None:
                     show_progress=display,
                     workspace=workspace,
                     clash_bin=binpath,
+                    use_ipinfo=purity_config.use_ipinfo,
+                    ipinfo_token=purity_config.ipinfo_token,
                 )
                 
                 nochecks = quality.optimize_by_purity(

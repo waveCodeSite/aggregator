@@ -221,6 +221,7 @@ def _get_real_ip_through_proxy(listener_port: int, retry: int = 2) -> Optional[s
 def check_ip_purity_through_proxy(
     proxy: dict, listener_port: int = 0,
     use_scamalytics: bool = False, retry: int = 2,
+    use_ipinfo: bool = False, ipinfo_token: str = "",
 ) -> IpPurityResult:
     """
     通过代理节点自身检测 IP 纯净度
@@ -298,6 +299,40 @@ def check_ip_purity_through_proxy(
         except Exception:
             pass
 
+    if use_ipinfo and ipinfo_token and real_ip:
+        try:
+            url = f"https://ipinfo.io/{real_ip}?token={ipinfo_token}"
+            req = urllib.request.Request(url=url)
+            req.add_header("User-Agent", utils.USER_AGENT)
+            resp = urllib.request.urlopen(req, timeout=15)
+            data = json.loads(resp.read().decode("utf-8"))
+            privacy = data.get("privacy", {})
+            if privacy.get("tor", False):
+                purity.is_tor = True
+                purity.is_vpn = True
+            if privacy.get("vpn", False):
+                purity.is_vpn = True
+            if privacy.get("proxy", False):
+                purity.is_proxy = True
+            if privacy.get("hosting", False):
+                purity.is_datacenter = True
+            # 补充 ASN（如果 ip-api 没拿到）
+            if not purity.asn:
+                asn_info = data.get("asn", {})
+                if isinstance(asn_info, dict):
+                    asn_str = asn_info.get("asn", "")
+                    if asn_str:
+                        asn_match = re.search(r'AS(\d+)', str(asn_str), re.IGNORECASE)
+                        if asn_match:
+                            purity.asn = int(asn_match.group(1))
+                elif isinstance(asn_info, str):
+                    asn_match = re.search(r'AS(\d+)', asn_info, re.IGNORECASE)
+                    if asn_match:
+                        purity.asn = int(asn_match.group(1))
+            purity.source = "ip-api+ipinfo" if purity.source == "ip-api" else "ipinfo"
+        except Exception:
+            pass
+
     purity.purity_score = _compute_purity_score(
         ip_type=purity.ip_type, is_datacenter=purity.is_datacenter,
         is_proxy=purity.is_proxy, is_vpn=purity.is_vpn, is_tor=purity.is_tor,
@@ -313,6 +348,7 @@ def batch_check_ip_purity(
     retry: int = 2, num_threads: int = 16,
     show_progress: bool = False,
     workspace: str = "", clash_bin: str = "",
+    use_ipinfo: bool = False, ipinfo_token: str = "",
 ) -> dict[str, IpPurityResult]:
     """
     批量检测 IP 纯净度
@@ -363,7 +399,7 @@ def batch_check_ip_purity(
             continue
         name = p.get("name", "")
         lp = port_map.get(name, 0) if use_listener else 0
-        params.append([p, lp, use_scamalytics, retry])
+        params.append([p, lp, use_scamalytics, retry, use_ipinfo, ipinfo_token])
 
     if not params:
         return {}
@@ -485,6 +521,8 @@ class PurityConfig:
     purity_threshold: float = 0.0
     top_ratio: float = 1.0
     inject_tags: bool = True
+    use_ipinfo: bool = False
+    ipinfo_token: str = ""
 
     @staticmethod
     def from_dict(data: dict) -> "PurityConfig":
@@ -499,6 +537,8 @@ class PurityConfig:
             purity_threshold=min(1.0, max(0.0, float(data.get("purity_threshold", 0.0)))),
             top_ratio=min(1.0, max(0.01, float(data.get("top_ratio", 1.0)))),
             inject_tags=data.get("inject_tags", True),
+            use_ipinfo=data.get("use_ipinfo", False),
+            ipinfo_token=data.get("ipinfo_token", ""),
         )
 
 
@@ -518,6 +558,10 @@ def load_purity_config_from_env() -> PurityConfig:
         tr = os.environ.get("PURITY_TOP_RATIO", "")
         if tr: config.top_ratio = min(1.0, max(0.01, float(tr)))
         config.inject_tags = os.environ.get("PURITY_INJECT_TAGS", "true").lower() not in ["false", "0"]
+        config.use_ipinfo = os.environ.get("PURITY_USE_IPINFO", "").lower() in ["true", "1"]
+        token = os.environ.get("IPINFO_TOKEN", "")
+        if token:
+            config.ipinfo_token = token
     except (ValueError, TypeError):
         pass
     return config
