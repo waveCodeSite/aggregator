@@ -323,6 +323,7 @@ def close_ticket(
 ) -> bool:
     if utils.isblank(domain) or tid < 0 or not headers or retry <= 0:
         logger.info(f"[TicketError] cannot close ticket because invalidate arguments, domain: {domain}, tid: {tid}")
+        return False
 
     url = domain + utils.get_subpath(api_prefix) + "user/ticket/close"
     params = {"id": tid}
@@ -507,7 +508,7 @@ def get_free_plan(
             return None
 
         # 查找流量最多的免费套餐
-        sorted(plans, key=lambda x: x.trafficflow, reverse=True)
+        plans.sort(key=lambda x: x.trafficflow, reverse=True)
         return plans[0]
     except:
         logger.error(f"cannot fetch free plans because response is empty, domain: {domain}")

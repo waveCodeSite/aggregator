@@ -32,6 +32,8 @@ env:
   PURITY_DROP_VPN: "true"
   PURITY_THRESHOLD: "0.0"
   PURITY_INJECT_TAGS: "true"
+  PURITY_USE_IPINFO: "true"
+  IPINFO_TOKEN: ${{ secrets.IPINFO_TOKEN }}
 
 jobs:
   process:

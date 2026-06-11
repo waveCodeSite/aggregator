@@ -310,6 +310,8 @@ def aggregate(args: argparse.Namespace) -> None:
                     "purity_threshold": float(os.environ.get("PURITY_THRESHOLD", "0.0")),
                     "top_ratio": float(os.environ.get("PURITY_TOP_RATIO", "1.0")),
                     "use_scamalytics": os.environ.get("PURITY_USE_SCAMALYTICS", "false").lower() in ["true", "1"],
+                    "use_ipinfo": os.environ.get("PURITY_USE_IPINFO", "false").lower() in ["true", "1"],
+                    "ipinfo_token": os.environ.get("IPINFO_TOKEN", ""),
                 })
                 
                 purity_map = quality.batch_check_ip_purity(
@@ -320,6 +322,8 @@ def aggregate(args: argparse.Namespace) -> None:
                     show_progress=display,
                     workspace=workspace,
                     clash_bin=os.path.join(workspace, clash_bin),
+                    use_ipinfo=purity_config.use_ipinfo,
+                    ipinfo_token=purity_config.ipinfo_token,
                 )
                 
                 nodes = quality.optimize_by_purity(

@@ -590,7 +590,7 @@ def aggregate(args: argparse.Namespace) -> None:
         nochecks, starttime = proxies, time.time()
 
         if not skip:
-            checks, nochecks = workflow.liveness_fillter(proxies=proxies)
+            checks, nochecks = workflow.liveness_filter(proxies=proxies)
             if checks:
                 # executable
                 utils.chmod(binpath)

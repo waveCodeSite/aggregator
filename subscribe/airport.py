@@ -15,6 +15,7 @@ import traceback
 import urllib
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
@@ -109,11 +110,6 @@ class RegisterRequire:
     api_prefix: str = ""
 
 
-class NoRedirHandler(urllib.request.HTTPRedirectHandler):
-    def http_error_302(self, req, fp, code, msg, headers):
-        return fp
-
-    http_error_301 = http_error_302
 
 
 def issspanel(domain: str) -> bool:
@@ -122,7 +118,7 @@ def issspanel(domain: str) -> bool:
             return -1
 
         try:
-            opener = urllib.request.build_opener(NoRedirHandler)
+            opener = urllib.request.build_opener(utils.NoRedirect)
             opener.addheaders = [("User-Agent", utils.USER_AGENT)]
             response = opener.open(fullurl=url, timeout=10)
             return response.getcode()
@@ -216,7 +212,7 @@ class AirPort:
             logger.debug(f"[QueryError] try to explore another register require, domain: {domain}")
             content = utils.http_get(url=f"{domain}{api_prefix}guest/comm/config", retry=2, proxy=proxy)
 
-        if not content.startswith("{") and content.endswith("}"):
+        if not content or not (content.strip().startswith("{") or content.strip().startswith("[")):
             logger.debug(f"[QueryError] cannot get register require, domain: {domain}")
             return RegisterRequire(verify=default, invite=default, recaptcha=default)
 
@@ -226,12 +222,6 @@ class AirPort:
             invite_force = data.get("is_invite_force", 0) != 0
             recaptcha = data.get("is_recaptcha", 0) != 0
             whitelist = data.get("email_whitelist_suffix", [])
-
-            try:
-                from collections.abc import Iterable
-            except ImportError:
-                from collections import Iterable
-
             if whitelist is None or not isinstance(whitelist, Iterable):
                 whitelist = []
 

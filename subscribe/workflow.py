@@ -147,8 +147,8 @@ def executewrapper(task_conf: TaskConfig) -> tuple[int, list]:
     return (taskid, proxies)
 
 
-def liveness_fillter(proxies: list) -> tuple[list, list]:
-    if not list:
+def liveness_filter(proxies: list) -> tuple[list, list]:
+    if not proxies:
         return [], []
 
     checks, nochecks = [], []

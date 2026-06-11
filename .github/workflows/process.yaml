@@ -1,8 +1,7 @@
 name: Process
 on:
-  schedule:
-    - cron: "05 03 * * *"
-    - cron: "05 11 * * *"
+  # 已禁用定时触发：需要配置 SUBSCRIBE_CONF 才能使用
+  # 改用 Collect + Refresh 工作流即可
   workflow_dispatch:
 
 env:
