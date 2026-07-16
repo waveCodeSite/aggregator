@@ -15,7 +15,6 @@ import traceback
 import urllib
 import urllib.parse
 import urllib.request
-from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
@@ -212,7 +211,7 @@ class AirPort:
             logger.debug(f"[QueryError] try to explore another register require, domain: {domain}")
             content = utils.http_get(url=f"{domain}{api_prefix}guest/comm/config", retry=2, proxy=proxy)
 
-        if not content or not (content.strip().startswith("{") or content.strip().startswith("[")):
+        if not content.startswith("{") and content.endswith("}"):
             logger.debug(f"[QueryError] cannot get register require, domain: {domain}")
             return RegisterRequire(verify=default, invite=default, recaptcha=default)
 
@@ -222,6 +221,12 @@ class AirPort:
             invite_force = data.get("is_invite_force", 0) != 0
             recaptcha = data.get("is_recaptcha", 0) != 0
             whitelist = data.get("email_whitelist_suffix", [])
+
+            try:
+                from collections.abc import Iterable
+            except ImportError:
+                from collections import Iterable
+
             if whitelist is None or not isinstance(whitelist, Iterable):
                 whitelist = []
 

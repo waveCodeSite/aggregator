@@ -296,7 +296,6 @@ def country_name_zh(country_code: str) -> str:
     return COUNTRY_NAME_ZH.get(country_code.upper(), "")
 
 
-MEITUAN_IP_LOCATE_URL = "https://apimobile.meituan.com/locate/v2/ip/loc?rgeo=true&ip={ip}"
 CHINA_PROVINCE_SUFFIXES = (
     "特别行政区",
     "维吾尔自治区",
@@ -306,6 +305,60 @@ CHINA_PROVINCE_SUFFIXES = (
     "省",
     "市",
 )
+CHINA_PROVINCE_ALIASES = {
+    "anhui": "安徽",
+    "beijing": "北京",
+    "chongqing": "重庆",
+    "fujian": "福建",
+    "gansu": "甘肃",
+    "guangdong": "广东",
+    "guangxi": "广西",
+    "guangxizhuang": "广西",
+    "guizhou": "贵州",
+    "hainan": "海南",
+    "hebei": "河北",
+    "heilongjiang": "黑龙江",
+    "henan": "河南",
+    "hubei": "湖北",
+    "hunan": "湖南",
+    "innermongolia": "内蒙古",
+    "jiangsu": "江苏",
+    "jiangxi": "江西",
+    "jilin": "吉林",
+    "liaoning": "辽宁",
+    "neimenggu": "内蒙古",
+    "neimongol": "内蒙古",
+    "ningxia": "宁夏",
+    "ningxiahuizu": "宁夏",
+    "qinghai": "青海",
+    "shaanxi": "陕西",
+    "shandong": "山东",
+    "shanghai": "上海",
+    "shanxi": "山西",
+    "sichuan": "四川",
+    "tianjin": "天津",
+    "tibet": "西藏",
+    "xinjiang": "新疆",
+    "xinjianguygur": "新疆",
+    "xinjianguyghur": "新疆",
+    "xizang": "西藏",
+    "yunnan": "云南",
+    "zhejiang": "浙江",
+}
+CHINA_MAINLAND_PROVINCES = frozenset(CHINA_PROVINCE_ALIASES.values())
+CHINA_PROVINCE_ALIAS_PREFIXES = tuple(
+    sorted(CHINA_PROVINCE_ALIASES.items(), key=lambda item: len(item[0]), reverse=True)
+)
+CHINA_PROVINCE_EN_SUFFIXES = (
+    "autonomousregion",
+    "municipality",
+    "province",
+    "region",
+    "sheng",
+    "city",
+)
+
+REGION_KEYS = set(["province", "province_name", "region", "region_name", "state", "state_name"])
 
 
 def short_company_name(value: str) -> str:
@@ -501,6 +554,7 @@ class IPLibrary:
         country: str,
         retries: int,
         timeout: int,
+        data: Optional[Dict] = None,
     ) -> str:
         country_code = (country_code or "").upper()
         if country_code != "CN" or not ip:
@@ -509,35 +563,34 @@ class IPLibrary:
         if ip in self._caches:
             return self._caches[ip]
 
-        province = await self._lookup_province(session, ip, retries, timeout)
-        resolved = f"中国{province}" if province else "中国"
+        province = self._extract_province(data)
+        if not province:
+            return "中国"
+
+        resolved = f"中国{province}"
         self._caches[ip] = resolved
         return resolved
 
-    async def _lookup_province(self, session: aiohttp.ClientSession, ip: str, retries: int, timeout: int) -> str:
-        url = MEITUAN_IP_LOCATE_URL.format(ip=quote(ip, safe=""))
-        data, _ = await self._make_request(
-            session=session,
-            url=url,
-            retries=max(1, min(retries, 2)),
-            timeout=max(1, min(timeout, 3)),
-        )
+    def _extract_province(self, data: Optional[Dict]) -> str:
         if not isinstance(data, dict):
             return ""
 
-        payload = data.get("data")
-        if not isinstance(payload, dict):
-            return ""
+        candidates: List[Any] = []
+        for key in REGION_KEYS:
+            candidates.append(data.get(key))
 
-        rgeo = payload.get("rgeo")
-        if not isinstance(rgeo, dict):
-            return ""
+        for parent_key in ("location", "geo"):
+            nested = data.get(parent_key)
+            if isinstance(nested, dict):
+                for key in REGION_KEYS:
+                    candidates.append(nested.get(key))
 
-        country = (rgeo.get("country") or "").strip()
-        if country and country != "中国":
-            return ""
+        for value in candidates:
+            province = self._normalize_province(value)
+            if province:
+                return province
 
-        return self._normalize_province(rgeo.get("province") or "")
+        return ""
 
     @staticmethod
     def _normalize_province(province: str) -> str:
@@ -591,6 +644,7 @@ class IPInfoLibrary(IPLibrary):
             country=country_name_zh(country_code) or country_code or "未知",
             retries=retries,
             timeout=timeout,
+            data=data,
         )
         base = f"{flag} {country}{label}".strip()
         if include_asn_name and company_name:
@@ -675,6 +729,7 @@ class IPPureLibrary(IPLibrary):
             country=country_name_zh(country_code) or (data.get("country") or "未知"),
             retries=retries,
             timeout=timeout,
+            data=data,
         )
 
         company_name = short_company_name(data.get("asOrganization") or "")
@@ -729,6 +784,7 @@ class IP2LocationLibrary(IPLibrary):
             or data.get("country", {}).get("name", "")
             or "未知",
             retries=retries,
+            data=data,
             timeout=timeout,
         )
 
@@ -827,6 +883,7 @@ class IPLarkLibrary(IPLibrary):
             country=country_name_zh(country_code) or (data.get("country_zh") or data.get("country") or "未知"),
             retries=retries,
             timeout=timeout,
+            data=data,
         )
 
         # native if registered country code equals country code else broadcast

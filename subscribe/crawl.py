@@ -1278,15 +1278,15 @@ def check_status(
         if response.getcode() != 200:
             return False, connectable
 
-        # 先检查流量头部，避免不必要的大数据下载
-        subscription = response.getheader("subscription-userinfo")
-
-        # limit the maximum read to avoid constant data downloads from speed test sites
-        content = str(response.read(512 * 1024), encoding="utf8")
+        # in order to avoid the request to the speed test site causing constant data downloads, limit the maximum read to 15MB
+        content = str(response.read(15 * 1024 * 1024), encoding="utf8")
 
         # response text is too short, ignore
         if len(content) < 32:
             return False, False
+
+        # 订阅流量信息
+        subscription = response.getheader("subscription-userinfo")
 
         # 情况1: base64 编码格式（v2ray）
         if utils.isb64encode(content):
