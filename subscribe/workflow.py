@@ -6,6 +6,7 @@
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 
 import renewal
@@ -135,16 +136,30 @@ def execute(task_conf: TaskConfig) -> list:
         f"finished fetch proxy: name=[{task_conf.name}]\tid=[{task_conf.index}]\tdomain=[{obj.ref}]\tcount=[{len(proxies)}]"
     )
 
-    return proxies
+    # 新注册成功的账号信息，用于持久化到 Gist 供 Refresh 清理 / Checkin 签到
+    account = None
+    if not task_conf.sub and obj.username and obj.password and obj.sub:
+        account = {
+            "domain": obj.ref,
+            "email": obj.username,
+            "passwd": obj.password,
+            "sub": obj.sub,
+            "login": f"{obj.api_prefix}passport/auth/login",
+            "checkin": f"{obj.api_prefix}user/checkin",
+            "jsonify": obj.api_prefix == ANOTHER_API_PREFIX,
+            "register_time": int(time.time()),
+        }
+
+    return proxies, account
 
 
-def executewrapper(task_conf: TaskConfig) -> tuple[int, list]:
+def executewrapper(task_conf: TaskConfig) -> tuple[int, list, dict]:
     if not task_conf:
-        return (-1, [])
+        return (-1, [], None)
 
     taskid = task_conf.taskid
-    proxies = execute(task_conf=task_conf)
-    return (taskid, proxies)
+    proxies, account = execute(task_conf=task_conf)
+    return (taskid, proxies, account)
 
 
 def liveness_filter(proxies: list) -> tuple[list, list]:

@@ -50,9 +50,14 @@ def extract_domain(url) -> str:
     return url[:end]
 
 
-def login(url, params, headers, retry) -> str:
+def login(url, params, headers, retry, jsonify=False) -> str:
     try:
-        data = urllib.parse.urlencode(params).encode(encoding="UTF8")
+        if jsonify:
+            headers["content-type"] = "application/json"
+            data = json.dumps(params).encode(encoding="UTF8")
+        else:
+            headers["content-type"] = "application/x-www-form-urlencoded; charset=UTF-8"
+            data = urllib.parse.urlencode(params).encode(encoding="UTF8")
 
         request = urllib.request.Request(url, data=data, headers=headers, method="POST")
 
@@ -69,7 +74,7 @@ def login(url, params, headers, retry) -> str:
         retry -= 1
 
         if retry > 0:
-            return login(url, params, headers, retry)
+            return login(url, params, headers, retry, jsonify)
 
         print("[LoginError] URL: {}".format(extract_domain(url)))
         return ""
@@ -114,6 +119,85 @@ def config_load(filename) -> dict:
     return json.loads(config)
 
 
+def load_accounts_from_gist() -> list:
+    """从私有 Gist 读取 Collect 自动注册并持久化的账号列表"""
+    token = os.environ.get("GIST_PAT", "")
+    link = os.environ.get("GIST_LINK", "")
+    if not token or not link:
+        print("[LoadAccountsError] environment GIST_PAT or GIST_LINK is empty, fallback to local config")
+        return []
+
+    words = str(link).strip().split("/", maxsplit=1)
+    if len(words) != 2 or not words[0].strip() or not words[1].strip():
+        print("[LoadAccountsError] invalid GIST_LINK, should be 'username/gist_id' format")
+        return []
+
+    username, gist_id = words[0].strip(), words[1].strip()
+    url = "https://gist.githubusercontent.com/{}/{}/raw/accounts.json".format(username, gist_id)
+    headers = {"Authorization": "Bearer {}".format(token), "User-Agent": HEADER.get("user-agent", "")}
+
+    try:
+        request = urllib.request.Request(url, headers=headers)
+        response = urllib.request.urlopen(request, timeout=30, context=CTX)
+        if response.getcode() != 200:
+            print("[LoadAccountsError] cannot load accounts from gist, code: {}".format(response.getcode()))
+            return []
+
+        data = json.loads(response.read().decode("UTF8"))
+    except Exception as e:
+        print("[LoadAccountsError] cannot load accounts from gist: {}".format(str(e)))
+        return []
+
+    if not isinstance(data, dict):
+        return []
+
+    domains = []
+    for domain, acc in data.items():
+        if not acc or not isinstance(acc, dict):
+            continue
+
+        email, passwd = acc.get("email", ""), acc.get("passwd", "")
+        if not email or not passwd:
+            continue
+
+        domains.append(
+            {
+                "domain": domain,
+                "param": {
+                    "email": email,
+                    "passwd": passwd,
+                    "login": acc.get("login", "/auth/login"),
+                    "checkin": acc.get("checkin", "/user/checkin"),
+                    "jsonify": acc.get("jsonify", False),
+                    "sub": acc.get("sub", ""),
+                },
+            }
+        )
+
+    return domains
+
+
+def check_sub_valid(url: str) -> bool:
+    """签到前检查订阅是否仍有效；无订阅链接视为有效（兼容手动配置）"""
+    if not url:
+        return True
+
+    try:
+        request = urllib.request.Request(
+            url, headers={"User-Agent": "{}; Clash.Meta; Mihomo; Shadowrocket;".format(HEADER.get("user-agent", ""))}
+        )
+        response = urllib.request.urlopen(request, timeout=10, context=CTX)
+        if response.getcode() != 200:
+            return False
+
+        # 内容过短视为失效（防止命中错误页面）
+        content = response.read(1024 * 1024)
+        return len(content) >= 32
+    except Exception as e:
+        print("[CheckSubError] URL: {}	Error: {}".format(extract_domain(url), str(e)))
+        return False
+
+
 def flow(domain, params, headers) -> bool:
     domain = extract_domain(domain.strip())
     if not domain:
@@ -128,7 +212,8 @@ def flow(domain, params, headers) -> bool:
 
     user_info = {"email": params.get("email", ""), "passwd": params.get("passwd", "")}
 
-    text = login(login_url, user_info, headers, 3)
+    jsonify = params.get("jsonify", False)
+    text = login(login_url, user_info, headers, 3, jsonify)
     if not text:
         return False
 
@@ -144,12 +229,27 @@ def flow(domain, params, headers) -> bool:
 
 
 def wrapper(args) -> bool:
-    return flow(args.get("domain", ""), args.get("param", {}), HEADER)
+    param = args.get("param", {}) if isinstance(args, dict) else {}
+    sub = param.get("sub", "") if isinstance(param, dict) else ""
+
+    # 订阅已失效的账号直接跳过，减少无效签到请求
+    if not check_sub_valid(sub):
+        print("[SkipCheckin] subscription is invalid, domain: {}".format(args.get("domain", "") if isinstance(args, dict) else ""))
+        return False
+
+    return flow(args.get("domain", ""), param, HEADER)
 
 
 def main() -> None:
-    config = config_load(os.path.join(PATH, "config.json"))
-    params = config.get("domains", [])
+    # 优先读取 Gist 上持久化的账号（Collect 自动注册），失败则回退本地 config.json
+    params = load_accounts_from_gist()
+    if not params:
+        config = config_load(os.path.join(PATH, "config.json"))
+        params = config.get("domains", []) if config else []
+
+    if not params:
+        print("[CheckinError] cannot found any valid account, exit")
+        return
 
     cpu_count = multiprocessing.cpu_count()
     num = len(params) if len(params) <= cpu_count else cpu_count

@@ -43,6 +43,11 @@ def assign(
     num_threads: int = 0,
     **kwargs,
 ) -> list[TaskConfig]:
+    # 用于收集失效订阅对应的域名，供调用方清理持久化的账号（可变对象引用传递）
+    dead_domains = kwargs.get("dead_domains", None)
+    if dead_domains is None:
+        dead_domains = set()
+
     def load_exist(username: str, gist_id: str, access_token: str, filename: str) -> list[str]:
         if not filename:
             return []
@@ -61,7 +66,9 @@ def assign(
             push_tool = push.PushToGist(token=access_token)
             url = push_tool.raw_url(config={"username": username, "gistid": gist_id, "filename": filename})
 
-            content = utils.http_get(url=url, timeout=30)
+            # 私有 Gist 需要携带 token 才能读取
+            headers = {"Authorization": f"Bearer {access_token}", "User-Agent": utils.USER_AGENT}
+            content = utils.http_get(url=url, headers=headers, timeout=30)
             items = re.findall(pattern, content, flags=re.M)
             if items:
                 subscriptions.update(items)
@@ -76,6 +83,13 @@ def assign(
             num_threads=num_threads,
             show_progress=display,
         )
+
+        # 收集失效订阅对应的域名，供调用方清理持久化的账号
+        for i in range(len(links)):
+            if not results[i][0] or results[i][1]:
+                domain = utils.extract_domain(url=links[i], include_protocal=True)
+                if domain:
+                    dead_domains.add(domain)
 
         return [links[i] for i in range(len(links)) if results[i][0] and not results[i][1]]
 
@@ -215,6 +229,8 @@ def aggregate(args: argparse.Namespace) -> None:
     access_token = utils.trim(args.key)
     username, gist_id = parse_gist_link(args.gist)
 
+    # 收集失效订阅对应的域名（Refresh 时用于清理失效账号）
+    dead_domains = set()
     tasks = assign(
         bin_name=subconverter_bin,
         domains_file="domains.txt",
@@ -230,6 +246,7 @@ def aggregate(args: argparse.Namespace) -> None:
         access_token=access_token,
         subscribes_file=subscribes_file,
         customize_link=args.yourself,
+        dead_domains=dead_domains,
     )
 
     if not tasks:
@@ -444,6 +461,51 @@ def aggregate(args: argparse.Namespace) -> None:
 
         if urls:
             files[subscribes_file] = {"content": "\n".join(urls), "filename": subscribes_file}
+
+        # ========== 账号持久化：合并新注册账号、清理失效账号 ==========
+        accounts_file = "accounts.json"
+        accounts = {}
+        for x in results:
+            if not x or len(x) < 3 or not x[2]:
+                continue
+            acc = x[2]
+            domain = utils.trim(acc.get("domain", ""))
+            if domain:
+                accounts[domain] = acc
+
+        # 读取 Gist 上已有的账号记录，保留旧账号（如 Refresh 模式本次不产生新账号）
+        push_tool = push.PushToGist(token=access_token)
+        old_url = push_tool.raw_url(config={"username": username, "gistid": gist_id, "filename": accounts_file})
+        headers = {"Authorization": f"Bearer {access_token}", "User-Agent": utils.USER_AGENT}
+        old_content = utils.http_get(url=old_url, headers=headers, timeout=30)
+        if old_content:
+            try:
+                old_accounts = json.loads(old_content)
+                if isinstance(old_accounts, dict):
+                    for domain, acc in old_accounts.items():
+                        if (
+                            domain not in accounts
+                            and isinstance(acc, dict)
+                            and acc.get("email")
+                            and acc.get("passwd")
+                        ):
+                            accounts[domain] = acc
+            except:
+                logger.warning(f"cannot parse existing accounts from gist, will overwrite: {accounts_file}")
+
+        # 清理失效账号（订阅链接已失效的机场，对应账号一并移除）
+        if dead_domains:
+            removed = [d for d in dead_domains if d in accounts]
+            for d in removed:
+                accounts.pop(d, None)
+            if removed:
+                logger.info(f"removed {len(removed)} invalid accounts: {removed}")
+
+        files[accounts_file] = {
+            "content": json.dumps(accounts, ensure_ascii=False, indent=2),
+            "filename": accounts_file,
+        }
+        # ========== 账号持久化结束 ==========
 
         if files:
             push_client = push.PushToGist(token=access_token)

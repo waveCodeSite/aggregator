@@ -4,6 +4,13 @@ on:
     - cron: "45 02 * * *"
   workflow_dispatch:
 
+env:
+  # github access token, 用于读取 Gist 上持久化的机场账号
+  GIST_PAT: ${{ secrets.GIST_PAT }}
+
+  # github username and gist id, separated by '/'
+  GIST_LINK: ${{ secrets.GIST_LINK }}
+
 jobs:
   sync_with_upstream:
     runs-on: ubuntu-latest
