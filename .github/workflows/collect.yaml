@@ -1,8 +1,8 @@
 name: Collect
 on:
-  # executed once a week on Sundays at 00:00
+  # 每周一 00:30 UTC（北京时间 08:30）运行，避开 Refresh 的整点触发，防止被取消
   schedule:
-    - cron: "0 0 * * 1"
+    - cron: "30 0 * * 1"
   workflow_dispatch:
 
 concurrency:
