@@ -5,6 +5,7 @@
 
 import argparse
 import itertools
+import json
 import os
 import random
 import re
@@ -355,8 +356,9 @@ def aggregate(args: argparse.Namespace) -> None:
                 logger.error(f"IP purity check failed: {str(e)}")
             
             if not nodes:
-                logger.error(f"all proxies removed after purity filtering")
-                sys.exit(0)
+                # 防御：纯净度过滤全灭时回退保留原始节点，避免 Collect 中断导致文件无法上传
+                logger.error(f"all proxies removed after purity filtering, fallback to original nodes")
+                nodes = [p for p in proxies if isinstance(p, dict)]
             
             logger.info(f"IP purity check done, final count: {len(nodes)}")
         # ========== IP 纯净度检测结束 ==========
@@ -478,7 +480,8 @@ def aggregate(args: argparse.Namespace) -> None:
         old_url = push_tool.raw_url(config={"username": username, "gistid": gist_id, "filename": accounts_file})
         headers = {"Authorization": f"Bearer {access_token}", "User-Agent": utils.USER_AGENT}
         old_content = utils.http_get(url=old_url, headers=headers, timeout=30)
-        if old_content:
+        has_old_accounts = bool(old_content)
+        if has_old_accounts:
             try:
                 old_accounts = json.loads(old_content)
                 if isinstance(old_accounts, dict):
@@ -492,6 +495,8 @@ def aggregate(args: argparse.Namespace) -> None:
                             accounts[domain] = acc
             except:
                 logger.warning(f"cannot parse existing accounts from gist, will overwrite: {accounts_file}")
+        else:
+            logger.info(f"accounts file not found in gist, skip account management: {accounts_file}")
 
         # 清理失效账号（订阅链接已失效的机场，对应账号一并移除）
         if dead_domains:
@@ -501,10 +506,12 @@ def aggregate(args: argparse.Namespace) -> None:
             if removed:
                 logger.info(f"removed {len(removed)} invalid accounts: {removed}")
 
-        files[accounts_file] = {
-            "content": json.dumps(accounts, ensure_ascii=False, indent=2),
-            "filename": accounts_file,
-        }
+        # 仅当已有账号文件或本次产生新账号时才回写，避免凭空创建空文件
+        if has_old_accounts or accounts:
+            files[accounts_file] = {
+                "content": json.dumps(accounts, ensure_ascii=False, indent=2),
+                "filename": accounts_file,
+            }
         # ========== 账号持久化结束 ==========
 
         if files:

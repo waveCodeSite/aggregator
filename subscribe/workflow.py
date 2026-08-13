@@ -84,7 +84,7 @@ class TaskConfig:
     api_prefix: str = "/api/v1/"
 
 
-def execute(task_conf: TaskConfig) -> list:
+def execute(task_conf: TaskConfig) -> tuple[list, dict]:
     if not task_conf or not isinstance(task_conf, TaskConfig):
         return []
 
