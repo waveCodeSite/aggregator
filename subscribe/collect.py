@@ -363,6 +363,20 @@ def aggregate(args: argparse.Namespace) -> None:
             logger.info(f"IP purity check done, final count: {len(nodes)}")
         # ========== IP 纯净度检测结束 ==========
 
+    # Refresh 兜底：节点数少于阈值时重新收集（去掉 --refresh 重跑完整注册流程）
+    try:
+        min_nodes = int(os.environ.get("MIN_NODES", "5") or "5")
+    except ValueError:
+        min_nodes = 5
+    min_nodes = max(0, min_nodes)
+    if args.refresh and min_nodes > 0 and len(nodes) < min_nodes:
+        logger.warning(
+            f"only {len(nodes)} proxies after refresh, less than {min_nodes}, trigger recollect..."
+        )
+        # 复用仍有效的旧订阅，并重新爬取、注册新机场
+        argv = [os.path.abspath(sys.argv[0])] + [a for a in sys.argv[1:] if a not in ("--refresh", "-r")]
+        sys.exit(subprocess.call([sys.executable] + argv))
+
     subscriptions = set()
     for p in proxies:
         # 移除无用的标记

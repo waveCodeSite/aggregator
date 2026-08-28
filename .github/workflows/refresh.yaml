@@ -26,6 +26,9 @@ env:
   # include special protocols, such as vless hysteria2 and hysteria
   ENABLE_SPECIAL_PROTOCOLS: ${{ vars.ENABLE_SPECIAL_PROTOCOLS }}
 
+  # refresh 后节点数少于该值则触发重新收集（默认 5，设为 0 可关闭）
+  MIN_NODES: ${{ vars.MIN_NODES }}
+
 jobs:
   process:
     runs-on: ubuntu-latest
